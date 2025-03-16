@@ -48,7 +48,8 @@ func main() {
 		runServerText()
 	} else if config.ServerAddress != "" {
 		fmt.Printf("Running as client, connecting to: %s\n", config.ServerAddress)
-		runClient()
+		// runClient()
+		runClientforAll()
 	} else {
 		fmt.Println("You must specify either -file (for running as a server) or -server (for running as a client)")
 		flag.Usage()
@@ -68,7 +69,9 @@ func runServerText() {
 	fmt.Printf("Starting server\n")
 	fmt.Printf("Serving text: %s\n", config.Text)
 
-	address := fmt.Sprintf(":%d", config.BasePort)
+	// address := fmt.Sprintf(":%d", config.BasePort)
+	address := fmt.Sprintf("0.0.0.0:%d", config.BasePort) // Accepts external connections
+
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatalf("Error listening on port %d: %v", config.BasePort, err)
@@ -120,7 +123,9 @@ func runServer() {
 	fmt.Printf("Starting server\n")
 	fmt.Printf("Serving file: %s (%.2f MB)\n", config.FileName, float64(fileInfo.Size())/1024/1024)
 
-	address := fmt.Sprintf(":%d", config.BasePort)
+	// address := fmt.Sprintf(":%d", config.BasePort)
+	address := fmt.Sprintf("0.0.0.0:%d", config.BasePort) // Accepts external connections
+
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatalf("Error listening on port %d: %v", config.BasePort, err)
@@ -178,10 +183,19 @@ func sendFile(conn net.Conn) {
 
 	log.Printf("Sent %d bytes", bytesWritten)
 }
-func runClient() {
-	fmt.Printf("Starting client\n")
 
-	address := net.JoinHostPort(config.ServerAddress, fmt.Sprintf("%d", config.BasePort))
+func runClientforAll() {
+	active := ipaddr()
+	fmt.Println("Active devices: ", len(active))
+	for _, ip := range active {
+		runClient(ip)
+	}
+}
+func runClient(ip string) {
+	fmt.Printf("Starting client\n %s", ip)
+	// address := fmt.Sprintf("%s:%d", ip, config.BasePort)
+
+	address := net.JoinHostPort(ip, fmt.Sprintf("%d", config.BasePort))
 
 	// Connect to server
 	conn, err := net.Dial("tcp", address)
