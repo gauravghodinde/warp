@@ -39,8 +39,6 @@ func main() {
 	flag.IntVar(&config.BufferSize, "buffer", DefaultBufferSize, "buffer size in bytes")
 	flag.Parse()
 
-	// Display banner
-
 	// Determine mode and run
 	if config.FileName != "" {
 		fmt.Printf("Running as server, serving file: %s\n", config.FileName)
