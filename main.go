@@ -10,7 +10,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+var wg sync.WaitGroup
 
 // Configuration constants
 const (
@@ -186,13 +189,16 @@ func sendFile(conn net.Conn) {
 
 func runClientforAll() {
 	active := ipaddr()
-	fmt.Println("Active devices: ", len(active))
+	fmt.Println("Active devices: ", active)
 	for _, ip := range active {
-		runClient(ip)
+		wg.Add(1)
+		go runClient(ip)
 	}
+	wg.Wait()
 }
 func runClient(ip string) {
-	fmt.Printf("Starting client\n %s", ip)
+	defer wg.Done()
+	fmt.Printf(" Starting client %s\n", ip)
 	// address := fmt.Sprintf("%s:%d", ip, config.BasePort)
 
 	address := net.JoinHostPort(ip, fmt.Sprintf("%d", config.BasePort))
@@ -200,7 +206,9 @@ func runClient(ip string) {
 	// Connect to server
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
-		log.Fatalf("Error connecting to %s: %v", address, err)
+		// log.Fatalf("Error connecting to %s: %v", address, err)
+		fmt.Printf("Error connecting to %s: %v\n", address, err)
+		return
 	}
 	defer conn.Close()
 
