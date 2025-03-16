@@ -1,6 +1,6 @@
 ### **Building a P2P Message/Files Sharing App in Go — Detailed Roadmap**
 
-To build a robust and scalable P2P message/files sharing app in Go, follow this structured approach:
+
 
 ---
 
