@@ -24,6 +24,7 @@ type Config struct {
 	FileName      string
 	BasePort      int
 	BufferSize    int
+	Text          string
 }
 
 // Global configuration
@@ -33,6 +34,7 @@ func main() {
 	// Configure flags
 	flag.StringVar(&config.ServerAddress, "server", "", "(run as client) server address to connect to")
 	flag.StringVar(&config.FileName, "file", "", "(run as server) file to serve")
+	flag.StringVar(&config.Text, "text", "", "(run as server) Text to serve")
 	flag.IntVar(&config.BasePort, "baseport", DefaultBasePort, "base port number")
 	flag.IntVar(&config.BufferSize, "buffer", DefaultBufferSize, "buffer size in bytes")
 	flag.Parse()
@@ -43,6 +45,9 @@ func main() {
 	if config.FileName != "" {
 		fmt.Printf("Running as server, serving file: %s\n", config.FileName)
 		runServer()
+	} else if config.Text != "" {
+		fmt.Printf("Running as server, serving text: %s\n", config.Text)
+		runServerText()
 	} else if config.ServerAddress != "" {
 		fmt.Printf("Running as client, connecting to: %s\n", config.ServerAddress)
 		runClient()
@@ -61,6 +66,52 @@ func padString(s string, length int) string {
 }
 
 // Server Implementation
+func runServerText() {
+	fmt.Printf("Starting server\n")
+	fmt.Printf("Serving text: %s\n", config.Text)
+
+	address := fmt.Sprintf(":%d", config.BasePort)
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Fatalf("Error listening on port %d: %v", config.BasePort, err)
+	}
+	defer listener.Close()
+
+	fmt.Printf("Listening on port %d\n", config.BasePort)
+	fmt.Println("Waiting for client connection...")
+
+	// Accept a single connection
+	conn, err := listener.Accept()
+	if err != nil {
+		log.Fatalf("Error accepting connection: %v", err)
+	}
+	defer conn.Close()
+
+	sendText(conn)
+}
+func sendText(conn net.Conn) {
+	defer conn.Close()
+
+	// Format header information
+	fileSizeHeader := padString(strconv.Itoa(len(config.Text)), 10)
+	fileNameHeader := padString("text", 64)
+	log.Printf("Sending text: %s (%s bytes)", fileNameHeader, fileSizeHeader)
+
+	// Send headers
+	conn.Write([]byte(fileSizeHeader))
+	conn.Write([]byte(fileNameHeader))
+
+	// Create buffer for sending
+	buffer := make([]byte, config.BufferSize)
+
+	// Send the data
+	bytesWritten, err := io.CopyBuffer(conn, strings.NewReader(config.Text), buffer)
+	if err != nil {
+		log.Printf("Error sending text: %v", err)
+	}
+
+	log.Printf("Sent %d bytes", bytesWritten)
+}
 func runServer() {
 	// Validate file exists
 	fileInfo, err := os.Stat(config.FileName)
@@ -129,8 +180,6 @@ func sendFile(conn net.Conn) {
 
 	log.Printf("Sent %d bytes", bytesWritten)
 }
-
-// Client Implementation
 func runClient() {
 	fmt.Printf("Starting client\n")
 
@@ -163,6 +212,17 @@ func runClient() {
 
 	fileName := strings.Trim(string(bufferFileName), ":")
 
+	// ✅ If the received "file" is actually text, print it instead of saving
+	if fileName == "text" {
+		buffer := make([]byte, fileSize)
+		_, err := io.ReadFull(conn, buffer) // Ensure full read
+		if err != nil {
+			log.Fatalf("Error reading text: %v", err)
+		}
+		fmt.Println("\nReceived text:\n" + string(buffer))
+		return
+	}
+
 	fmt.Printf("Downloading file: %s\n", fileName)
 
 	// Create output file
@@ -172,7 +232,7 @@ func runClient() {
 	}
 	defer outputFile.Close()
 
-	// Copy data
+	// Copy data to file
 	bytesWritten, err := io.Copy(outputFile, io.LimitReader(conn, fileSize))
 	if err != nil {
 		log.Fatalf("Error receiving data: %v", err)
