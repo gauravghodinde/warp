@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -9,141 +8,256 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
 
+var wg sync.WaitGroup
+
+// Configuration constants
 const (
-	Port       = 27001
-	BufferSize = 1024 * 64 // 64 KB buffer size
+	DefaultBufferSize = 1024 * 64 // Increased buffer size for better performance
+	DefaultBasePort   = 27001
 )
 
-var (
-	clients    = make(map[net.Conn]bool)
-	clientsMux sync.Mutex
-)
+// Config holds all configuration for the application
+type Config struct {
+	ServerAddress string
+	FileName      string
+	BasePort      int
+	BufferSize    int
+	Text          string
+}
+
+// Global configuration
+var config Config
 
 func main() {
-	serverMode := flag.Bool("server", false, "Run as server")
+	// Configure flags
+	flag.StringVar(&config.ServerAddress, "server", "", "(run as client) server address to connect to")
+	flag.StringVar(&config.FileName, "file", "", "(run as server) file to serve")
+	flag.StringVar(&config.Text, "text", "", "(run as server) Text to serve")
+	flag.IntVar(&config.BasePort, "baseport", DefaultBasePort, "base port number")
+	flag.IntVar(&config.BufferSize, "buffer", DefaultBufferSize, "buffer size in bytes")
 	flag.Parse()
 
-	if *serverMode {
-		startServer()
+	// Determine mode and run
+	if config.FileName != "" {
+		fmt.Printf("Running as server, serving file: %s\n", config.FileName)
+		runServer()
+	} else if config.Text != "" {
+		fmt.Printf("Running as server, serving text: %s\n", config.Text)
+		runServerText()
+	} else if config.ServerAddress != "" {
+		fmt.Printf("Running as client, connecting to: %s\n", config.ServerAddress)
+		// runClient()
+		runClientforAll()
 	} else {
-		startClient()
+		fmt.Println("You must specify either -file (for running as a server) or -server (for running as a client)")
+		flag.Usage()
 	}
 }
 
-// ========================== SERVER CODE ==========================
-func startServer() {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", Port))
-	if err != nil {
-		log.Fatal("Error starting server:", err)
+// padString ensures a string is padded to the specified length
+func padString(s string, length int) string {
+	if len(s) >= length {
+		return s[:length]
 	}
-	defer ln.Close()
+	return s + strings.Repeat(":", length-len(s))
+}
 
-	log.Printf("Server started on port %d\n", Port)
+// Server Implementation
+func runServerText() {
+	fmt.Printf("Starting server\n")
+	fmt.Printf("Serving text: %s\n", config.Text)
+
+	// address := fmt.Sprintf(":%d", config.BasePort)
+	address := fmt.Sprintf("0.0.0.0:%d", config.BasePort) // Accepts external connections
+
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Fatalf("Error listening on port %d: %v", config.BasePort, err)
+	}
+	defer listener.Close()
+
+	fmt.Printf("Listening on port %d\n", config.BasePort)
+	fmt.Println("Waiting for client connection...")
 
 	for {
-		conn, err := ln.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
-			log.Println("Connection error:", err)
+			log.Printf("Error accepting connection: %v", err)
 			continue
 		}
-		clientsMux.Lock()
-		clients[conn] = true
-		clientsMux.Unlock()
-		go handleClient(conn)
+		go sendText(conn)
 	}
+
 }
+func sendText(conn net.Conn) {
+	defer conn.Close()
 
-func handleClient(conn net.Conn) {
-	defer func() {
-		clientsMux.Lock()
-		delete(clients, conn)
-		clientsMux.Unlock()
-		conn.Close()
-	}()
+	// Format header information
+	fileSizeHeader := padString(strconv.Itoa(len(config.Text)), 10)
+	fileNameHeader := padString("text", 64)
+	log.Printf("Sending text: %s (%s bytes)", fileNameHeader, fileSizeHeader)
 
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		message := scanner.Text()
-		if strings.HasPrefix(message, "file:") {
-			handleFileTransfer(conn, message[5:])
-		} else {
-			broadcastMessage(fmt.Sprintf("%s: %s", conn.RemoteAddr(), message), conn)
-		}
-	}
-}
+	// Send headers
+	conn.Write([]byte(fileSizeHeader))
+	conn.Write([]byte(fileNameHeader))
 
-func broadcastMessage(msg string, sender net.Conn) {
-	log.Println("Broadcasting message:", msg)
-	clientsMux.Lock()
-	for client := range clients {
-		if client != sender {
-			fmt.Fprintln(client, msg)
-		}
-	}
-	clientsMux.Unlock()
-}
+	// Create buffer for sending
+	buffer := make([]byte, config.BufferSize)
 
-func handleFileTransfer(conn net.Conn, fileName string) {
-	log.Printf("Receiving file: %s from %s\n", fileName, conn.RemoteAddr())
-
-	file, err := os.Create(filepath.Base(fileName))
+	// Send the data
+	bytesWritten, err := io.CopyBuffer(conn, strings.NewReader(config.Text), buffer)
 	if err != nil {
-		log.Println("Error creating file:", err)
+		log.Printf("Error sending text: %v", err)
+	}
+
+	log.Printf("Sent %d bytes", bytesWritten)
+}
+func runServer() {
+	// Validate file exists
+	fileInfo, err := os.Stat(config.FileName)
+	if err != nil {
+		log.Fatalf("Error accessing file %s: %v", config.FileName, err)
+	}
+
+	fmt.Printf("Starting server\n")
+	fmt.Printf("Serving file: %s (%.2f MB)\n", config.FileName, float64(fileInfo.Size())/1024/1024)
+
+	// address := fmt.Sprintf(":%d", config.BasePort)
+	address := fmt.Sprintf("0.0.0.0:%d", config.BasePort) // Accepts external connections
+
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Fatalf("Error listening on port %d: %v", config.BasePort, err)
+	}
+	defer listener.Close()
+
+	fmt.Printf("Listening on port %d\n", config.BasePort)
+	fmt.Println("Waiting for client connection...")
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Error accepting connection: %v", err)
+			continue
+		}
+		go sendFile(conn) // Handle each client in a goroutine
+	}
+}
+
+func sendFile(conn net.Conn) {
+	defer conn.Close()
+
+	// Open the file
+	file, err := os.Open(config.FileName)
+	if err != nil {
+		log.Printf("Error opening file: %v", err)
 		return
 	}
 	defer file.Close()
 
-	io.Copy(file, conn)
-	log.Printf("File %s received successfully\n", fileName)
-	broadcastMessage(fmt.Sprintf("[FILE] %s shared a file: %s", conn.RemoteAddr(), fileName), conn)
+	// Get file info
+	fileInfo, err := file.Stat()
+	if err != nil {
+		log.Printf("Error getting file info: %v", err)
+		return
+	}
+
+	// Format header information
+	fileSizeHeader := padString(strconv.FormatInt(fileInfo.Size(), 10), 10)
+	fileNameHeader := padString(filepath.Base(fileInfo.Name()), 64)
+	log.Printf("Sending file: %s (%s bytes)", fileNameHeader, fileSizeHeader)
+
+	// Send headers
+	conn.Write([]byte(fileSizeHeader))
+	conn.Write([]byte(fileNameHeader))
+
+	// Create buffer for sending
+	buffer := make([]byte, config.BufferSize)
+
+	// Send the data
+	bytesWritten, err := io.CopyBuffer(conn, file, buffer)
+	if err != nil {
+		log.Printf("Error sending file: %v", err)
+	}
+
+	log.Printf("Sent %d bytes", bytesWritten)
 }
 
-// ========================== CLIENT CODE ==========================
-func startClient() {
-	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", Port))
+func runClientforAll() {
+	active := ipaddr()
+	fmt.Println("Active devices: ", strings.Join(active, ", "))
+	for _, ip := range active {
+		wg.Add(1)
+		go runClient(ip)
+	}
+	wg.Wait()
+}
+func runClient(ip string) {
+	defer wg.Done()
+	// fmt.Printf(" Starting client %s\n", ip)
+	// address := fmt.Sprintf("%s:%d", ip, config.BasePort)
+
+	address := net.JoinHostPort(ip, fmt.Sprintf("%d", config.BasePort))
+
+	// Connect to server
+	conn, err := net.Dial("tcp", address)
 	if err != nil {
-		log.Fatal("Error connecting to server:", err)
+		// log.Fatalf("Error connecting to %s: %v", address, err)
+		// fmt.Printf("Error connecting to %s: %v\n", address, err)
+		return
 	}
 	defer conn.Close()
 
-	go listenForMessages(conn)
-
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		message := scanner.Text()
-		if strings.HasPrefix(message, "file:") {
-			sendFile(conn, strings.TrimPrefix(message, "file:"))
-		} else {
-			fmt.Fprintln(conn, message)
-		}
-	}
-}
-
-func listenForMessages(conn net.Conn) {
-	reader := bufio.NewReader(conn)
-	for {
-		msg, err := reader.ReadString('\n')
-		if err != nil {
-			log.Println("Disconnected from server")
-			return
-		}
-		fmt.Print(msg)
-	}
-}
-
-func sendFile(conn net.Conn, fileName string) {
-	file, err := os.Open(fileName)
+	// Read headers
+	bufferFileSize := make([]byte, 10)
+	_, err = conn.Read(bufferFileSize)
 	if err != nil {
-		log.Println("Error opening file:", err)
+		log.Fatalf("Error reading file size: %v", err)
+	}
+
+	fileSize, err := strconv.ParseInt(strings.Trim(string(bufferFileSize), ":"), 10, 64)
+	if err != nil {
+		log.Fatalf("Error parsing file size: %v", err)
+	}
+
+	bufferFileName := make([]byte, 64)
+	_, err = conn.Read(bufferFileName)
+	if err != nil {
+		log.Fatalf("Error reading file name: %v", err)
+	}
+
+	fileName := strings.Trim(string(bufferFileName), ":")
+
+	// ✅ If the received "file" is actually text, print it instead of saving
+	if fileName == "text" {
+		buffer := make([]byte, fileSize)
+		_, err := io.ReadFull(conn, buffer) // Ensure full read
+		if err != nil {
+			log.Fatalf("Error reading text: %v", err)
+		}
+		fmt.Printf("\nReceived text from %s:  %s\n", ip, string(buffer))
 		return
 	}
-	defer file.Close()
+	fmt.Printf("Downloading file: %s\n", fileName)
 
-	fmt.Fprintf(conn, "file:%s\n", fileName)
-	io.Copy(conn, file)
-	log.Printf("File %s sent successfully\n", fileName)
+	// Create output file
+	outputFile, err := os.Create(fileName)
+	if err != nil {
+		log.Fatalf("Error creating output file: %v", err)
+	}
+	defer outputFile.Close()
+
+	// Copy data to file
+	bytesWritten, err := io.Copy(outputFile, io.LimitReader(conn, fileSize))
+	if err != nil {
+		log.Fatalf("Error receiving data: %v", err)
+	}
+
+	log.Printf("Received %d bytes", bytesWritten)
+	fmt.Printf("\nDownload complete: %s\n", fileName)
 }
