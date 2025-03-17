@@ -84,14 +84,15 @@ func runServerText() {
 	fmt.Printf("Listening on port %d\n", config.BasePort)
 	fmt.Println("Waiting for client connection...")
 
-	// Accept a single connection
-	conn, err := listener.Accept()
-	if err != nil {
-		log.Fatalf("Error accepting connection: %v", err)
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Error accepting connection: %v", err)
+			continue
+		}
+		go sendText(conn)
 	}
-	defer conn.Close()
 
-	sendText(conn)
 }
 func sendText(conn net.Conn) {
 	defer conn.Close()
@@ -138,14 +139,14 @@ func runServer() {
 	fmt.Printf("Listening on port %d\n", config.BasePort)
 	fmt.Println("Waiting for client connection...")
 
-	// Accept a single connection
-	conn, err := listener.Accept()
-	if err != nil {
-		log.Fatalf("Error accepting connection: %v", err)
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Error accepting connection: %v", err)
+			continue
+		}
+		go sendFile(conn) // Handle each client in a goroutine
 	}
-	defer conn.Close()
-
-	sendFile(conn)
 }
 
 func sendFile(conn net.Conn) {
@@ -189,7 +190,7 @@ func sendFile(conn net.Conn) {
 
 func runClientforAll() {
 	active := ipaddr()
-	fmt.Println("Active devices: ", active)
+	fmt.Println("Active devices: ", strings.Join(active, ", "))
 	for _, ip := range active {
 		wg.Add(1)
 		go runClient(ip)
@@ -207,7 +208,7 @@ func runClient(ip string) {
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		// log.Fatalf("Error connecting to %s: %v", address, err)
-		fmt.Printf("Error connecting to %s: %v\n", address, err)
+		// fmt.Printf("Error connecting to %s: %v\n", address, err)
 		return
 	}
 	defer conn.Close()
