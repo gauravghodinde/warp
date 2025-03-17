@@ -35,13 +35,13 @@ var config Config
 
 func main() {
 	// Configure flags
-	flag.BoolVar(&config.server, "server", true, "run as a server")
+	// flag.BoolVar(&config.server, "server", true, "run as a server")
 	flag.StringVar(&config.FileName, "file", "", "(run as server) file to serve")
 	flag.StringVar(&config.Text, "text", "", "(run as server) Text to serve")
 	flag.IntVar(&config.BasePort, "baseport", DefaultBasePort, "base port number")
 	flag.IntVar(&config.BufferSize, "buffer", DefaultBufferSize, "buffer size in bytes")
 	flag.Parse()
-
+	config.server = config.FileName != "" || config.Text != ""
 	// Determine mode and run
 	if config.server {
 		fmt.Printf("Running as server, connecting to all active IPs\n")
@@ -201,7 +201,7 @@ func receiveData(conn net.Conn) {
 	// If the received "file" is actually text, print it instead of saving
 	if fileName == "text" {
 		buffer := make([]byte, fileSize)
-		_, err := io.ReadFull(conn, buffer) // Ensure full read
+		_, err := io.ReadFull(conn, buffer)
 		if err != nil {
 			log.Fatalf("Error reading text: %v", err)
 		}
